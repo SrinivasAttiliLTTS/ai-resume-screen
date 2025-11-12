@@ -68,6 +68,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def home():
+    return {"message": "Backend is running successfully!"}
 
 @app.post("/analyze/")
 async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(...)):
