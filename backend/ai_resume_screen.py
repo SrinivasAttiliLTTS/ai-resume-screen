@@ -59,8 +59,6 @@
 # backend/ai_resume_screen.py
 
 import docx2txt
-import nltk
-import tempfile
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -98,3 +96,4 @@ def analyze_resumes(jd_text, resumes):
         })
 
     return results
+

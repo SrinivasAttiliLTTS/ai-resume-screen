@@ -58,22 +58,18 @@
 #     return {"message": "Backend is running successfully!"}
 
 # backend/app.py
-import os
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import tempfile
 import logging
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from ai_resume_screen import extract_text_from_docx, analyze_resumes
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("backend_app")
-
-app = FastAPI(title="AI Resume Screening Backend")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for production narrow to your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,7 +77,7 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"status": "ok"}
+    return {"message": "AI Resume Screening Backend is running"}
 
 @app.post("/analyze")
 async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(...)):
@@ -98,7 +94,6 @@ async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(.
         resume_temp = tempfile.NamedTemporaryFile(delete=False)
         resume_temp.write(await resume.read())
         resume_temp.close()
-
         resume_text = extract_text_from_docx(resume_temp.name)
         if resume_text:
             resume_data.append((resume.filename, resume_text))
