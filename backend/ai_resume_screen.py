@@ -58,11 +58,12 @@
 
 # backend/ai_resume_screen.py
 
+# backend/ai_resume_screen.py
+
 import docx2txt
 import logging
 
 logging.basicConfig(level=logging.INFO)
-
 
 def extract_text_from_docx(file_path):
     """Extract text from a .docx file."""
@@ -72,42 +73,29 @@ def extract_text_from_docx(file_path):
         logging.error(f"Error reading {file_path}: {e}")
         return ""
 
-
 def analyze_resumes(jd_text, resumes):
-    """
-    Analyze resumes against JD.
-    :param jd_text: text of job description
-    :param resumes: list of (filename, text)
-    :return: list of analysis dicts
-    """
+    """Analyze resumes against JD with strengths/missing & scores."""
     results = []
     jd_words = set(jd_text.lower().split())
 
     for filename, text in resumes:
         resume_words = set(text.lower().split())
 
-        # Primary score: word overlap with JD
-        primary_score = len(jd_words & resume_words) / len(jd_words) * 100 if jd_words else 0
+        # Find overlap
+        strengths = jd_words & resume_words
+        missing = jd_words - resume_words
 
-        # Secondary score: simple heuristic (longer resumes score slightly higher)
-        secondary_score = (len(resume_words) / 1000) * 10
-
-        # Overall score
+        primary_score = len(strengths) / len(jd_words) * 100 if jd_words else 0
+        secondary_score = (len(resume_words) / 1000) * 10  # word richness heuristic
         overall_score = (primary_score * 0.8) + (secondary_score * 0.2)
-
-        # Derive strengths and missing keywords
-        strengths = list(jd_words & resume_words)[:10]
-        missing = list(jd_words - resume_words)[:10]
 
         results.append({
             "Name": filename,
-            "Strengths": ", ".join(strengths) if strengths else "N/A",
-            "Missing": ", ".join(missing) if missing else "N/A",
+            "Strengths": ", ".join(list(strengths)[:10]) + "..." if strengths else "None",
+            "Missing": ", ".join(list(missing)[:10]) + "..." if missing else "None",
             "Primary_Score": round(primary_score, 2),
             "Secondary_Score": round(secondary_score, 2),
             "Overall_Score": round(overall_score, 2)
         })
 
     return results
-
-

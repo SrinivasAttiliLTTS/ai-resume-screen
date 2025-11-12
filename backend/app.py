@@ -59,40 +59,90 @@
 
 # backend/app.py
 
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import JSONResponse
-import tempfile
-import os
-import logging
-from ai_resume_screen import extract_text_from_docx, analyze_resumes
+# backend/app.py
 
-app = FastAPI()
+import os
+import tempfile
+import logging
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from ai_resume_screen import extract_text_from_docx, analyze_resumes
+import fitz  # PyMuPDF for PDF
+import docx2txt
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend_app")
 
+app = FastAPI()
 
-@app.get("/")
-def root():
-    return {"message": "AI Resume Screening Backend is running!"}
+# Allow frontend requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+def extract_text(file: UploadFile):
+    """Universal extractor with detailed logging"""
+    try:
+        suffix = os.path.splitext(file.filename)[1].lower()
+        logger.info(f"Extracting text from file: {file.filename} (type: {suffix})")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(file.file.read())
+            tmp_path = tmp.name
+
+        if suffix == ".docx":
+            text = extract_text_from_docx(tmp_path)
+        elif suffix == ".pdf":
+            text = ""
+            with fitz.open(tmp_path) as pdf:
+                for page in pdf:
+                    text += page.get_text()
+        elif suffix == ".txt":
+            with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        else:
+            raise ValueError(f"Unsupported file format: {suffix}")
+
+        logger.info(f"Extracted {len(text)} characters from {file.filename}")
+        return text
+
+    except Exception as e:
+        logger.error(f"Error extracting text from {file.filename}: {e}")
+        return ""
 
 @app.post("/analyze/")
 async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(...)):
-    logger.info(f"Received JD: {jd.filename} size={jd.size} suffix={os.path.splitext(jd.filename)[1]}")
+    try:
+        logger.info(f"Received JD: {jd.filename} size={jd.size} suffix={os.path.splitext(jd.filename)[1]}")
+        jd_text = extract_text(jd)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(jd.filename)[1]) as jd_temp:
-        jd_temp.write(await jd.read())
-        jd_text = extract_text_from_docx(jd_temp.name)
-        os.unlink(jd_temp.name)
+        if not jd_text.strip():
+            logger.error("JD extraction returned empty text")
+            raise HTTPException(status_code=400, detail="Failed to extract JD text")
 
-    resume_data = []
-    for resume in resumes:
-        logger.info(f"Received resume: {resume.filename} size={resume.size} suffix={os.path.splitext(resume.filename)[1]}")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(resume.filename)[1]) as tmp:
-            tmp.write(await resume.read())
-            text = extract_text_from_docx(tmp.name)
-            resume_data.append((resume.filename, text))
-            os.unlink(tmp.name)
+        resume_data = []
+        for resume in resumes:
+            logger.info(f"Received resume: {resume.filename} size={resume.size} suffix={os.path.splitext(resume.filename)[1]}")
+            text = extract_text(resume)
+            if text.strip():
+                resume_data.append((resume.filename, text))
+            else:
+                logger.warning(f"No text extracted from {resume.filename}")
 
-    results = analyze_resumes(jd_text, resume_data)
-    return JSONResponse({"results": results})
+        results = analyze_resumes(jd_text, resume_data)
+        logger.info(f"Returning {len(results)} results")
+
+        return JSONResponse(content={"results": results})
+
+    except Exception as e:
+        logger.error(f"Unhandled error in analyze(): {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/")
+async def root():
+    return {"message": "AI Resume Screening Backend running ✅"}
