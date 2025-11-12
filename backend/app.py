@@ -64,8 +64,7 @@ import logging
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
-from ai_resume_screen import extract_text_from_file, analyze_scores
+from ai_resume_screen import extract_text_from_docx, analyze_resumes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend_app")
@@ -84,67 +83,28 @@ app.add_middleware(
 def root():
     return {"status": "ok"}
 
-@app.post("/analyze/")
+@app.post("/analyze")
 async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(...)):
-    try:
-        # Save JD bytes to temp file
-        jd_suffix = os.path.splitext(jd.filename)[1] or ".docx"
-        jd_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=jd_suffix)
-        jd_bytes = await jd.read()
-        jd_tmp.write(jd_bytes)
-        jd_tmp.flush()
-        jd_tmp.close()
-        logger.info("Received JD: %s size=%d suffix=%s", jd.filename, len(jd_bytes), jd_suffix)
+    jd_temp = tempfile.NamedTemporaryFile(delete=False)
+    jd_temp.write(await jd.read())
+    jd_temp.close()
 
-        # Extract JD text (robust)
-        jd_text = extract_text_from_file(jd_tmp.name)
-        if not jd_text or len(jd_text.strip()) == 0:
-            logger.warning("JD extraction produced empty text for file: %s", jd.filename)
+    jd_text = extract_text_from_docx(jd_temp.name)
+    if not jd_text:
+        raise HTTPException(status_code=400, detail="Failed to extract JD text")
 
-        results = []
-        for resume in resumes:
-            res_suffix = os.path.splitext(resume.filename)[1] or ".docx"
-            res_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=res_suffix)
-            res_bytes = await resume.read()
-            res_tmp.write(res_bytes)
-            res_tmp.flush()
-            res_tmp.close()
-            logger.info("Received resume: %s size=%d suffix=%s", resume.filename, len(res_bytes), res_suffix)
+    resume_data = []
+    for resume in resumes:
+        resume_temp = tempfile.NamedTemporaryFile(delete=False)
+        resume_temp.write(await resume.read())
+        resume_temp.close()
 
-            # Extract resume text robustly
-            resume_text = extract_text_from_file(res_tmp.name)
-            if not resume_text or len(resume_text.strip()) == 0:
-                logger.warning("Resume extraction empty: %s", resume.filename)
+        resume_text = extract_text_from_docx(resume_temp.name)
+        if resume_text:
+            resume_data.append((resume.filename, resume_text))
 
-            # If extract_text_from_file returned empty, record helpful message instead of crashing
-            if not resume_text:
-                results.append({
-                    "Name": resume.filename,
-                    "Strengths": "",
-                    "Missing": "Could not extract text (unsupported or corrupted file).",
-                    "Primary Score": 0.0,
-                    "Secondary Score": 0.0,
-                    "Overall Score": 0.0
-                })
-            else:
-                analysis = analyze_scores(jd_text, resume_text)
-                results.append({"Name": resume.filename, **analysis})
+    if not resume_data:
+        raise HTTPException(status_code=400, detail="No valid resumes uploaded")
 
-            # cleanup
-            try:
-                os.unlink(res_tmp.name)
-            except Exception:
-                logger.exception("Failed to delete temp file %s", res_tmp.name)
-
-        # cleanup jd
-        try:
-            os.unlink(jd_tmp.name)
-        except Exception:
-            logger.exception("Failed to delete JD temp file %s", jd_tmp.name)
-
-        return JSONResponse({"results": results})
-
-    except Exception as e:
-        logger.exception("Unhandled exception in /analyze: %s", e)
-        # Return safe response with error message, frontend won't crash on missing key
-        return JSONResponse({"results": [], "error": str(e)}, status_code=500)
+    results = analyze_resumes(jd_text, resume_data)
+    return {"results": results}

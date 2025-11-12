@@ -57,118 +57,44 @@
 #     return score, matched, missing
 
 # backend/ai_resume_screen.py
-import os
-import re
+
 import docx2txt
-import fitz  # PyMuPDF
+import nltk
+import tempfile
 import logging
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ai_resume_screen")
 
-def extract_text_from_file(path: str) -> str:
-    """
-    Inspect extension and extract text accordingly.
-    Supports: .docx, .pdf, .txt
-    Returns text (empty string if extraction fails) and logs errors.
-    """
-    ext = os.path.splitext(path)[1].lower()
+def extract_text_from_docx(file_path):
+    """Extract text from a .docx file."""
     try:
-        if ext == ".docx":
-            # docx is actually a zip archive; docx2txt will raise BadZipFile if not valid
-            text = docx2txt.process(path)
-            return text or ""
-        elif ext == ".pdf":
-            text = ""
-            with fitz.open(path) as pdf:
-                for page in pdf:
-                    text += page.get_text()
-            return text or ""
-        elif ext == ".txt":
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                return f.read()
-        else:
-            # attempt safe fallback: try pdf then docx then text
-            try:
-                with fitz.open(path) as pdf:
-                    text = "".join(p.get_text() for p in pdf)
-                    if text.strip():
-                        return text
-            except Exception:
-                pass
-            try:
-                text = docx2txt.process(path)
-                if text and text.strip():
-                    return text
-            except Exception:
-                pass
-            # final fallback: read binary as text
-            try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                    return f.read()
-            except Exception:
-                logger.exception("Unable to extract text from unknown file type: %s", path)
-                return ""
+        return docx2txt.process(file_path)
     except Exception as e:
-        # Log full exception for Render logs and return an empty string
-        logger.exception("Error extracting text from %s: %s", path, e)
+        logging.error(f"Error reading {file_path}: {e}")
         return ""
 
-def normalize(text: str) -> str:
-    t = (text or "").lower()
-    t = re.sub(r"[^a-z0-9\s\+\#\.\-]", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
-
-def analyze_scores(jd_text: str, resume_text: str, primary_skills: list = None, secondary_skills: list = None):
+def analyze_resumes(jd_text, resumes):
     """
-    Simple keyword-based scoring.
-    primary_skills / secondary_skills optional: if provided, use them; else infer from JD by simple split.
-    Returns dict with exactly the fields frontend expects.
+    Analyze resumes against JD.
+    :param jd_text: text of job description
+    :param resumes: list of (filename, text)
+    :return: list of analysis dicts
     """
-    jd_norm = normalize(jd_text)
-    resume_norm = normalize(resume_text)
+    results = []
+    jd_words = set(jd_text.lower().split())
 
-    jd_tokens = jd_norm.split()
-    resume_tokens = set(resume_norm.split())
+    for filename, text in resumes:
+        resume_words = set(text.lower().split())
+        primary_score = len(jd_words & resume_words) / len(jd_words) * 100 if jd_words else 0
+        secondary_score = (len(resume_words) / 1000) * 10  # example heuristic
 
-    # If explicit lists not provided, naive extraction from JD:
-    if not primary_skills and not secondary_skills:
-        # attempt to find labeled sections "Primary Skills:" etc.
-        primary = []
-        secondary = []
-        m1 = re.search(r"primary skills?\s*[:\-]\s*(.*?)(?:secondary skills?:|\n\n|$)", jd_text, flags=re.IGNORECASE | re.DOTALL)
-        m2 = re.search(r"secondary skills?\s*[:\-]\s*(.*?)(?:other skills?:|\n\n|$)", jd_text, flags=re.IGNORECASE | re.DOTALL)
-        if m1:
-            primary = [s.strip().lower() for s in re.split(r'[,\n;/]+', m1.group(1)) if s.strip()]
-        if m2:
-            secondary = [s.strip().lower() for s in re.split(r'[,\n;/]+', m2.group(1)) if s.strip()]
-        # fallback: split first N tokens as primary, next as secondary
-        if not primary:
-            tokens = [t for t in jd_tokens if len(t) > 1]
-            primary = tokens[:5]
-            secondary = tokens[5:10]
-    else:
-        primary = [s.lower() for s in primary_skills or []]
-        secondary = [s.lower() for s in secondary_skills or []]
+        overall_score = (primary_score * 0.8) + (secondary_score * 0.2)
 
-    # match
-    matched_primary = [p for p in primary if p in resume_norm]
-    matched_secondary = [s for s in secondary if s in resume_norm]
+        results.append({
+            "filename": filename,
+            "primary_score": round(primary_score, 2),
+            "secondary_score": round(secondary_score, 2),
+            "overall_score": round(overall_score, 2)
+        })
 
-    primary_score = round((len(matched_primary) / len(primary) * 100), 2) if primary else 0.0
-    secondary_score = round((len(matched_secondary) / len(secondary) * 100), 2) if secondary else 0.0
-
-    overall = round(primary_score * 0.8 + secondary_score * 0.2, 2)
-    overall = min(100.0, overall)
-
-    strengths = matched_primary + matched_secondary
-    missing = [p for p in primary if p not in matched_primary] + [s for s in secondary if s not in matched_secondary]
-
-    return {
-        "Strengths": ", ".join(strengths) if strengths else "",
-        "Missing": ", ".join(missing) if missing else "",
-        "Primary Score": primary_score,
-        "Secondary Score": secondary_score,
-        "Overall Score": overall
-    }
+    return results
