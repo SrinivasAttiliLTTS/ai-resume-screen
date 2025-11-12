@@ -54,72 +54,41 @@
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from ai_resume_screen import analyze_resumes
 import tempfile
 import os
-from ai_resume_screen import analyze_resume, extract_text_from_docx
 
 app = FastAPI()
-
-# Allow frontend to access backend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 @app.get("/")
 def home():
     return {"message": "Backend is running successfully!"}
 
+# Allow frontend (Render) domain
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or replace with your frontend URL for security
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.post("/analyze/")
 async def analyze(jd: UploadFile = File(...), resumes: list[UploadFile] = File(...)):
-    # Read JD file
-    jd_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-    jd_bytes = await jd.read()
-    jd_temp.write(jd_bytes)
-    jd_temp.close()
+    # Save JD temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(jd.filename)[1]) as jd_temp:
+        jd_temp.write(await jd.read())
+        jd_temp.flush()
 
-    # Validate JD file
-    if not jd.filename.endswith(".docx"):
-        return {"error": f"JD file '{jd.filename}' is not a .docx file"}
-
-    jd_text = extract_text_from_docx(jd_temp.name)
-    os.unlink(jd_temp.name)
+    jd_text = analyze_resumes.extract_text(jd_temp.name)
 
     results = []
-
     for resume in resumes:
-        if not resume.filename.endswith(".docx"):
-            results.append({
-                "Name": resume.filename,
-                "Strengths": "",
-                "Missing": f"Invalid file format ({resume.filename})",
-                "Primary Score": 0,
-                "Secondary Score": 0,
-                "Overall Score": 0
-            })
-            continue
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(resume.filename)[1]) as temp_resume:
+            temp_resume.write(await resume.read())
+            temp_resume.flush()
+        results.append(analyze_resumes.compare_resume(jd_text, temp_resume.name))
 
-        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
-        temp_bytes = await resume.read()
-        temp.write(temp_bytes)
-        temp.close()
-
-        resume_text = extract_text_from_docx(temp.name)
-        os.unlink(temp.name)
-
-        analysis = analyze_resume(jd_text, resume_text)
-        candidate_name = resume.filename.replace(".docx", "")
-
-        results.append({
-            "Name": candidate_name,
-            **analysis
-        })
-
+    os.unlink(jd_temp.name)
     return {"results": results}
-
-
-@app.get("/")
-async def root():
-    return {"message": "AI Resume Screening Backend is Live ✅"}
