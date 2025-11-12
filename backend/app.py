@@ -5,6 +5,11 @@ from ai_resume_screen import extract_text_from_docx, analyze_resume
 
 app = FastAPI()
 
+
+@app.get("/")
+def home():
+    return {"message": "Backend is running successfully!"}
+
 # Allow React frontend to access backend
 app.add_middleware(
     CORSMiddleware,
