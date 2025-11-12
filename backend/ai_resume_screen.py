@@ -63,6 +63,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
+
 def extract_text_from_docx(file_path):
     """Extract text from a .docx file."""
     try:
@@ -70,6 +71,7 @@ def extract_text_from_docx(file_path):
     except Exception as e:
         logging.error(f"Error reading {file_path}: {e}")
         return ""
+
 
 def analyze_resumes(jd_text, resumes):
     """
@@ -83,17 +85,29 @@ def analyze_resumes(jd_text, resumes):
 
     for filename, text in resumes:
         resume_words = set(text.lower().split())
-        primary_score = len(jd_words & resume_words) / len(jd_words) * 100 if jd_words else 0
-        secondary_score = (len(resume_words) / 1000) * 10  # example heuristic
 
+        # Primary score: word overlap with JD
+        primary_score = len(jd_words & resume_words) / len(jd_words) * 100 if jd_words else 0
+
+        # Secondary score: simple heuristic (longer resumes score slightly higher)
+        secondary_score = (len(resume_words) / 1000) * 10
+
+        # Overall score
         overall_score = (primary_score * 0.8) + (secondary_score * 0.2)
 
+        # Derive strengths and missing keywords
+        strengths = list(jd_words & resume_words)[:10]
+        missing = list(jd_words - resume_words)[:10]
+
         results.append({
-            "filename": filename,
-            "primary_score": round(primary_score, 2),
-            "secondary_score": round(secondary_score, 2),
-            "overall_score": round(overall_score, 2)
+            "Name": filename,
+            "Strengths": ", ".join(strengths) if strengths else "N/A",
+            "Missing": ", ".join(missing) if missing else "N/A",
+            "Primary_Score": round(primary_score, 2),
+            "Secondary_Score": round(secondary_score, 2),
+            "Overall_Score": round(overall_score, 2)
         })
 
     return results
+
 
