@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 python-multipart
-nltk
 docx2txt
-gunicorn
 PyMuPDF
+gunicorn
+nltk
+openpyxl
