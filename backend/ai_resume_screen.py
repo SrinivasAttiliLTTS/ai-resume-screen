@@ -4,9 +4,14 @@ import re
 
 nltk.download('punkt', quiet=True)
 
+# def extract_text_from_docx(file_path):
+#     return docx2txt.process(file_path)
 def extract_text_from_docx(file_path):
-    return docx2txt.process(file_path)
-
+    try:
+        return docx2txt.process(file_path)
+    except Exception as e:
+        return f"Error reading file: {str(e)}"
+    
 def tokenize_text(text):
     return [word.lower() for word in nltk.word_tokenize(text) if word.isalpha()]
 
